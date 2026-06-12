@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Qo'l Kuzatuvli Qurol O'yini - Dinamik Tezlik</title>
+  <style>
+    :root {
+      --bg-1: #06080f;
+      --bg-2: #0d1222;
+      --hud: #eaf2ff;
+      --accent: #3de0ff;
+      --accent-2: #ff5a8a;
+      --muted: #9cb0cf;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at 20% 10%, #162344 0%, var(--bg-2) 35%, var(--bg-1) 100%);
+      color: var(--hud);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      touch-action: none;
+    }
+
+    #app {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #gameCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: transparent;
+    }
+
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .hud-top {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      font-weight: 700;
+      font-size: clamp(18px, 2.3vw, 30px);
+      text-shadow: 0 0 10px rgba(61, 224, 255, 0.35);
+      letter-spacing: 0.04em;
+    }
+
+    #status {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: clamp(20px, 3vw, 42px);
+      font-weight: 800;
+      color: var(--hud);
+      text-shadow: 0 0 12px rgba(255, 255, 255, 0.25), 0 0 30px rgba(61, 224, 255, 0.35);
+      text-align: center;
+      padding: 12px 20px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      background: rgba(7, 12, 24, 0.55);
+      backdrop-filter: blur(4px);
+      transition: opacity 0.25s ease;
+    }
+
+    #hint {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(6, 10, 20, 0.5);
+      color: var(--muted);
+      font-size: clamp(13px, 1.5vw, 17px);
+      text-align: center;
+      max-width: min(92vw, 850px);
+      line-height: 1.35;
+      letter-spacing: 0.02em;
+    }
+
+    #cam {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="gameCanvas"></canvas>
+  </div>
+
+  <video id="cam" autoplay playsinline muted></video>
+
+  <div id="hud" aria-live="polite">
+    <div class="hud-top">
+      <div id="scoreLabel">XAL: 0</div>
+      <div id="speedLabel">TEZLIK: 1.0x</div>
+    </div>
+    <div id="status">Tizim tayyorlanmoqda...</div>
+    <div id="hint">Ko'rsatkich barmoqni keskin tepaga silkiting. Nishonga olib tez harakat bilan o'q uzing.</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const video = document.getElementById("cam");
+
+      const scoreLabel = document.getElementById("scoreLabel");
+      const speedLabel = document.getElementById("speedLabel");
+      const statusEl = document.getElementById("status");
+
+      // Flick gesture tuning (timestamp-based).
+      // Balanced flick thresholds so quick upward shots still work, but accidental triggers are reduced.
+      const FLICK_WINDOW_MS = 180;
+      const FLICK_MIN_DT_MS = 14;
+      const FLICK_DY_THRESHOLD = 0.102;
+      const FLICK_VELOCITY_THRESHOLD = 0.64;
+      const FLICK_MAX_DX = 0.145;
+      const FLICK_RESET_DY = 0.03;
+      const INDEX_EXTENDED_MARGIN = 0.015;
+      const FINGER_HISTORY_SIZE = 12;
+      // Keep the cooldown responsive, but bias slightly toward control over oversensitivity.
+      const SHOT_COOLDOWN_MS = 185;
+      const PINCH_FALLBACK_THRESHOLD = 0.05;
+      const ENABLE_PINCH_FALLBACK = true;
+
+      // Crosshair smoothing/stabilization tuning.
+      // FILTER_MODE: "EMA" (default) or "ONE_EURO".
+      // EMA stays enabled, but the parameters below favor stable low-speed aim and fast large-motion travel.
+      const FILTER_MODE = "EMA";
+      const EMA_ALPHA = 0.27;
+      const DEADZONE_PX = 3.2;
+      const JITTER_HYSTERESIS_PX = 5.6;
+      const MAX_JUMP_PX = 118;
+      const HAND_CONFIDENCE_MIN = 0.38;
+      const HOLD_LAST_AIM_MS = 220;
+      const ONE_EURO_MIN_CUTOFF = 1.5;
+      const ONE_EURO_BETA = 0.032;
+      const ONE_EURO_D_CUTOFF = 1.0;
+      const AIM_MARGIN_PX = 8;
+      // Target 30-60 sends/sec depending on browser timing, while always favoring the latest frame.
+      const TRACKING_TARGET_INTERVAL_MS = 16;
+
+      // Aim assist tuning.
+      // Assist is subtle: low-speed only, near-center pull so it does not fight full-screen travel.
+      const HIT_RADIUS_MULTIPLIER = 1.38;
+      const ENABLE_MAGNETISM = true;
+      const MAGNET_RANGE_PX = 24;
+      const MAGNET_STRENGTH = 0.072;
+      const MAGNET_MAX_SPEED_PX_S = 900;
+      const HIT_WINDOW_MS = 100;
+      const AIM_HISTORY_MAX = 24;
+
+      // Particle burst tuning.
+      const PARTICLE_COUNT = 22;
+      const PARTICLE_TTL_MS = 430;
+      const PARTICLE_SPEED_MIN = 120;
+      const PARTICLE_SPEED_MAX = 360;
+      const PARTICLE_SIZE_RANGE = [2, 6];
+      const MAX_PARTICLES = 1200;
+
+      // Impact shockwave + optional screen shake.
+      const SHOCKWAVE_TTL_MS = 280;
+      const SHOCKWAVE_LINE_WIDTH = 3.2;
+      const ENABLE_SCREEN_SHAKE = true;
+      const SCREEN_SHAKE_TTL_MS = 110;
+      const SCREEN_SHAKE_INTENSITY = 3.4;
+
+      // Target style tuning.
+      const TARGET_STYLE_VARIANTS = 5;
+      const COLOR_PALETTE = [
+        {
+          fill: "rgba(68, 224, 255, 0.2)",
+          stroke: "rgba(172, 246, 255, 0.95)",
+          core: "rgba(225, 253, 255, 0.97)",
+          glow: "rgba(61, 224, 255, 0.85)",
+          particles: ["rgba(61, 224, 255, 1)", "rgba(172, 246, 255, 1)", "rgba(225, 253, 255, 1)"]
+        },
+        {
+          fill: "rgba(255, 111, 163, 0.2)",
+          stroke: "rgba(255, 160, 197, 0.95)",
+          core: "rgba(255, 226, 238, 0.98)",
+          glow: "rgba(255, 111, 163, 0.82)",
+          particles: ["rgba(255, 111, 163, 1)", "rgba(255, 160, 197, 1)", "rgba(255, 226, 238, 1)"]
+        },
+        {
+          fill: "rgba(115, 255, 184, 0.2)",
+          stroke: "rgba(171, 255, 214, 0.95)",
+          core: "rgba(231, 255, 246, 0.98)",
+          glow: "rgba(115, 255, 184, 0.82)",
+          particles: ["rgba(115, 255, 184, 1)", "rgba(171, 255, 214, 1)", "rgba(231, 255, 246, 1)"]
+        },
+        {
+          fill: "rgba(255, 204, 102, 0.22)",
+          stroke: "rgba(255, 226, 165, 0.96)",
+          core: "rgba(255, 246, 222, 0.98)",
+          glow: "rgba(255, 204, 102, 0.82)",
+          particles: ["rgba(255, 204, 102, 1)", "rgba(255, 226, 165, 1)", "rgba(255, 246, 222, 1)"]
+        },
+        {
+          fill: "rgba(166, 132, 255, 0.22)",
+          stroke: "rgba(209, 188, 255, 0.96)",
+          core: "rgba(241, 233, 255, 0.98)",
+          glow: "rgba(166, 132, 255, 0.8)",
+          particles: ["rgba(166, 132, 255, 1)", "rgba(209, 188, 255, 1)", "rgba(241, 233, 255, 1)"]
+        }
+      ];
+
+      class OneEuroFilter {
+        constructor(minCutoff, beta, dCutoff) {
+          this.minCutoff = minCutoff;
+          this.beta = beta;
+          this.dCutoff = dCutoff;
+          this.lastTime = null;
+          this.x = null;
+          this.dx = 0;
+        }
+
+        alpha(cutoff, dt) {
+          const tau = 1 / (2 * Math.PI * cutoff);
+          return 1 / (1 + tau / dt);
+        }
+
+        filter(value, timeMs) {
+          if (this.lastTime === null) {
+            this.lastTime = timeMs;
+            this.x = value;
+            this.dx = 0;
+            return value;
+          }
+
+          let dt = (timeMs - this.lastTime) / 1000;
+          if (!Number.isFinite(dt) || dt <= 0) {
+            dt = 1 / 60;
+          }
+
+          const rawDx = (value - this.x) / dt;
+          const aD = this.alpha(this.dCutoff, dt);
+          this.dx += (rawDx - this.dx) * aD;
+
+          const cutoff = this.minCutoff + this.beta * Math.abs(this.dx);
+          const a = this.alpha(cutoff, dt);
+          this.x += (value - this.x) * a;
+          this.lastTime = timeMs;
+          return this.x;
+        }
+      }
+
+      const state = {
+        score: 0,
+        speedMultiplier: 1.0,
+        maxSpeed: 3.0,
+        crosshair: { x: 0, y: 0, visible: false },
+        aimPoint: { x: 0, y: 0, visible: false },
+        aimHistory: [],
+        pinchNow: false,
+        pinchStarted: false,
+        handDetected: false,
+        flickArmed: false,
+        flickLocked: false,
+        lastFlickY: 0,
+        crosshairSpeed: 0,
+        fingerHistory: [],
+        pendingShot: false,
+        pendingShotAt: 0,
+        lastShotAt: 0,
+        shootCooldownMs: SHOT_COOLDOWN_MS,
+        targets: [],
+        effects: [],
+        particles: [],
+        shockwaves: [],
+        shakeMs: 0,
+        shakeMag: 0,
+        filter: {
+          initialized: false,
+          lastTs: 0,
+          lastRawX: 0,
+          lastRawY: 0,
+          emaX: 0,
+          emaY: 0,
+          euroX: new OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF),
+          euroY: new OneEuroFilter(ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_D_CUTOFF)
+        },
+        lastStableAimAt: 0,
+        lastSpawnAt: 0,
+        running: false,
+        statusLocked: true,
+        rafId: 0,
+        width: 0,
+        height: 0
+      };
+
+      function setStatus(message, hold = false) {
+        statusEl.textContent = message;
+        statusEl.style.opacity = "1";
+        state.statusLocked = hold;
+      }
+
+      function clearStatus() {
+        if (state.statusLocked) {
+          return;
+        }
+        statusEl.style.opacity = "0";
+      }
+
+      function resizeCanvas() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        state.width = w;
+        state.height = h;
+
+        if (!state.crosshair.visible) {
+          state.crosshair.x = w * 0.5;
+          state.crosshair.y = h * 0.5;
+          state.aimPoint.x = state.crosshair.x;
+          state.aimPoint.y = state.crosshair.y;
+        }
+      }
+
+      function randomBetween(min, max) {
+        return min + Math.random() * (max - min);
+      }
+
+      function createTargetStyle() {
+        const palette = COLOR_PALETTE[Math.floor(Math.random() * COLOR_PALETTE.length)];
+        const variantId = Math.floor(Math.random() * TARGET_STYLE_VARIANTS);
+        const variantType = variantId % TARGET_STYLE_VARIANTS;
+
+        const style = {
+          variantId,
+          fillColor: palette.fill,
+          strokeColor: palette.stroke,
+          coreColor: palette.core,
+          glowColor: palette.glow,
+          particleColors: palette.particles,
+          ringCount: 2,
+          ringWidth: 2.2,
+          dashPattern: [],
+          innerDot: true,
+          bullseye: false,
+          auraLayers: 1
+        };
+
+        if (variantType === 0) {
+          style.ringCount = 1;
+          style.ringWidth = 2.8;
+          style.auraLayers = 2;
+        } else if (variantType === 1) {
+          style.ringCount = 2;
+          style.ringWidth = 2.1;
+          style.bullseye = true;
+        } else if (variantType === 2) {
+          style.ringCount = 2;
+          style.ringWidth = 2.2;
+          style.dashPattern = [5, 6];
+          style.innerDot = true;
+        } else if (variantType === 3) {
+          style.ringCount = 3;
+          style.ringWidth = 1.8;
+          style.innerDot = false;
+          style.bullseye = true;
+          style.auraLayers = 2;
+        } else {
+          style.ringCount = 2;
+          style.ringWidth = 2.4;
+          style.dashPattern = [2, 4];
+          style.innerDot = true;
+          style.bullseye = true;
+        }
+
+        return style;
+      }
+
+      function createTarget() {
+        const radius = randomBetween(16, 34);
+        const movesRight = Math.random() < 0.5;
+        const x = movesRight
+          ? randomBetween(-radius * 2.2, state.width * 0.35)
+          : randomBetween(state.width * 0.65, state.width + radius * 2.2);
+        const y = randomBetween(radius + 42, state.height - radius - 28);
+
+        const horizontalSpeed = randomBetween(70, 130);
+        const vx = movesRight ? horizontalSpeed : -horizontalSpeed;
+        const vy = randomBetween(-18, 18);
+
+        return {
+          x,
+          y,
+          r: radius,
+          vx,
+          vy,
+          pulse: randomBetween(0, Math.PI * 2),
+          style: createTargetStyle()
+        };
+      }
+
+      function spawnTarget(count = 1) {
+        for (let i = 0; i < count; i += 1) {
+          state.targets.push(createTarget());
+        }
+      }
+
+      function updateSpeedFromScore() {
+        const next = Math.min(state.maxSpeed, 1 + Math.floor(state.score / 5) * 0.1);
+        state.speedMultiplier = Number(next.toFixed(1));
+        speedLabel.textContent = `TEZLIK: ${state.speedMultiplier.toFixed(1)}x`;
+      }
+
+      function updateTargets(dt) {
+        for (let i = 0; i < state.targets.length; i += 1) {
+          const t = state.targets[i];
+          t.x += t.vx * state.speedMultiplier * dt;
+          t.y += t.vy * (0.5 + state.speedMultiplier * 0.15) * dt;
+          t.pulse += 2.3 * dt;
+
+          const wrapPad = t.r + 26;
+          if (t.vx < 0 && t.x < -wrapPad) {
+            t.x = state.width + wrapPad;
+            t.y = randomBetween(t.r + 42, state.height - t.r - 28);
+          } else if (t.vx > 0 && t.x > state.width + wrapPad) {
+            t.x = -wrapPad;
+            t.y = randomBetween(t.r + 42, state.height - t.r - 28);
+          }
+
+          if (t.y - t.r < 30) {
+            t.y = 30 + t.r;
+            t.vy = Math.abs(t.vy);
+          } else if (t.y + t.r > state.height - 20) {
+            t.y = state.height - 20 - t.r;
+            t.vy = -Math.abs(t.vy);
+          }
+        }
+      }
+
+      function drawTarget(target) {
+        const t = target;
+        const style = t.style;
+        const pulse = Math.sin(t.pulse);
+        const baseR = t.r * (1 + pulse * 0.04);
+
+        ctx.save();
+        ctx.shadowBlur = 14 + Math.abs(pulse) * 6;
+        ctx.shadowColor = style.glowColor;
+
+        ctx.fillStyle = style.fillColor;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, baseR, 0, Math.PI * 2);
+        ctx.fill();
+
+        for (let i = 0; i < style.auraLayers; i += 1) {
+          const auraR = baseR + 3 + i * 4;
+          const auraAlpha = 0.2 - i * 0.07;
+          if (auraAlpha <= 0) {
+            continue;
+          }
+          ctx.globalAlpha = auraAlpha;
+          ctx.strokeStyle = style.strokeColor;
+          ctx.lineWidth = 1.4;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, auraR, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.globalAlpha = 1;
+        for (let i = 0; i < style.ringCount; i += 1) {
+          const ringR = baseR * (0.42 + ((i + 1) / (style.ringCount + 1)) * 0.78);
+          ctx.lineWidth = Math.max(1.2, style.ringWidth - i * 0.2);
+          ctx.strokeStyle = style.strokeColor;
+          if (style.dashPattern.length) {
+            const scale = 1 + i * 0.3;
+            ctx.setLineDash([style.dashPattern[0] * scale, style.dashPattern[1] * scale]);
+            ctx.lineDashOffset = t.pulse * 3 * (i % 2 === 0 ? 1 : -1);
+          } else {
+            ctx.setLineDash([]);
+          }
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, ringR, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        if (style.bullseye) {
+          ctx.lineWidth = 1.8;
+          ctx.strokeStyle = style.coreColor;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, baseR * 0.3, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, baseR * 0.17, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        if (style.innerDot) {
+          ctx.fillStyle = style.coreColor;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, Math.max(3, baseR * 0.14), 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.restore();
+      }
+
+      function drawCrosshair() {
+        if (!state.aimPoint.visible) {
+          return;
+        }
+
+        const x = state.aimPoint.x;
+        const y = state.aimPoint.y;
+        const armed = state.flickArmed || state.pinchNow;
+        const baseR = armed ? 13 : 17;
+
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = armed ? "rgba(255, 90, 138, 1)" : "rgba(61, 224, 255, 1)";
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = armed ? "rgba(255, 90, 138, 0.75)" : "rgba(61, 224, 255, 0.75)";
+
+        ctx.beginPath();
+        ctx.arc(x, y, baseR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        const l = baseR + 9;
+        ctx.beginPath();
+        ctx.moveTo(x - l, y);
+        ctx.lineTo(x - 4, y);
+        ctx.moveTo(x + 4, y);
+        ctx.lineTo(x + l, y);
+        ctx.moveTo(x, y - l);
+        ctx.lineTo(x, y - 4);
+        ctx.moveTo(x, y + 4);
+        ctx.lineTo(x, y + l);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      function addHitEffect(x, y, color = "rgba(255, 122, 163, 0.95)") {
+        state.effects.push({
+          x,
+          y,
+          age: 0,
+          life: 0.24,
+          color
+        });
+      }
+
+      function updateAndDrawEffects(dt) {
+        for (let i = state.effects.length - 1; i >= 0; i -= 1) {
+          const e = state.effects[i];
+          e.age += dt;
+          if (e.age >= e.life) {
+            state.effects.splice(i, 1);
+            continue;
+          }
+
+          const p = e.age / e.life;
+          const alpha = 1 - p;
+          const r = 10 + 64 * p;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = e.color;
+          ctx.lineWidth = Math.max(1.6, 4 * alpha);
+          ctx.shadowBlur = 18;
+          ctx.shadowColor = e.color;
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // Particle burst for shatter effect. Colors come from target palette.
+      function spawnBurstParticles(target, impactX, impactY) {
+        const speedBoost = 1 + (state.speedMultiplier - 1) * 0.24;
+        const count = Math.round(PARTICLE_COUNT + target.r * 0.3 + (state.speedMultiplier - 1) * 4);
+        const colors = target.style.particleColors;
+
+        for (let i = 0; i < count; i += 1) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = randomBetween(PARTICLE_SPEED_MIN, PARTICLE_SPEED_MAX) * speedBoost;
+          const life = PARTICLE_TTL_MS * randomBetween(0.7, 1.25);
+          const size = randomBetween(PARTICLE_SIZE_RANGE[0], PARTICLE_SIZE_RANGE[1]) * (0.85 + target.r / 32);
+
+          state.particles.push({
+            x: impactX,
+            y: impactY,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size,
+            age: 0,
+            life,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            drag: randomBetween(2.1, 3.6),
+            gravity: randomBetween(25, 70),
+            ring: Math.random() < 0.25
+          });
+        }
+
+        if (state.particles.length > MAX_PARTICLES) {
+          state.particles.splice(0, state.particles.length - MAX_PARTICLES);
+        }
+      }
+
+      function updateAndDrawParticles(dt) {
+        for (let i = state.particles.length - 1; i >= 0; i -= 1) {
+          const p = state.particles[i];
+          p.age += dt * 1000;
+          if (p.age >= p.life) {
+            state.particles.splice(i, 1);
+            continue;
+          }
+
+          const decay = Math.exp(-p.drag * dt);
+          p.vx *= decay;
+          p.vy = p.vy * decay + p.gravity * dt;
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+
+          const t = p.age / p.life;
+          const alpha = 1 - t;
+          const size = Math.max(0.8, p.size * (1 - t * 0.6));
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = p.color;
+
+          if (p.ring) {
+            ctx.strokeStyle = p.color;
+            ctx.lineWidth = Math.max(1, size * 0.35);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
+        }
+      }
+
+      // Shockwave ring strengthens impact readability.
+      function spawnShockwave(x, y, color) {
+        state.shockwaves.push({
+          x,
+          y,
+          age: 0,
+          life: SHOCKWAVE_TTL_MS,
+          startR: 8,
+          endR: 78,
+          color
+        });
+      }
+
+      function updateAndDrawShockwaves(dt) {
+        for (let i = state.shockwaves.length - 1; i >= 0; i -= 1) {
+          const s = state.shockwaves[i];
+          s.age += dt * 1000;
+          if (s.age >= s.life) {
+            state.shockwaves.splice(i, 1);
+            continue;
+          }
+
+          const p = s.age / s.life;
+          const radius = s.startR + (s.endR - s.startR) * p;
+          const alpha = 1 - p;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = Math.max(1, SHOCKWAVE_LINE_WIDTH * (1 - p * 0.35));
+          ctx.shadowBlur = 14;
+          ctx.shadowColor = s.color;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      function triggerScreenShake() {
+        if (!ENABLE_SCREEN_SHAKE) {
+          return;
+        }
+        state.shakeMs = SCREEN_SHAKE_TTL_MS;
+        state.shakeMag = SCREEN_SHAKE_INTENSITY * (1 + (state.speedMultiplier - 1) * 0.15);
+      }
+
+      function computeShakeOffset(dt) {
+        if (!ENABLE_SCREEN_SHAKE || state.shakeMs <= 0) {
+          return { x: 0, y: 0 };
+        }
+
+        state.shakeMs = Math.max(0, state.shakeMs - dt * 1000);
+        const t = state.shakeMs / SCREEN_SHAKE_TTL_MS;
+        const mag = state.shakeMag * t;
+        return {
+          x: randomBetween(-mag, mag),
+          y: randomBetween(-mag, mag)
+        };
+      }
+
+      // Aim assist: optional subtle magnetism near targets.
+      function applyMagnetism(x, y) {
+        if (!ENABLE_MAGNETISM || !state.targets.length || state.crosshairSpeed > MAGNET_MAX_SPEED_PX_S) {
+          return { x, y };
+        }
+
+        let nearest = null;
+        let nearestDist = Infinity;
+
+        for (let i = 0; i < state.targets.length; i += 1) {
+          const t = state.targets[i];
+          const dx = t.x - x;
+          const dy = t.y - y;
+          const d = Math.hypot(dx, dy);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = t;
+          }
+        }
+
+        if (!nearest) {
+          return { x, y };
+        }
+
+        const range = nearest.r + MAGNET_RANGE_PX;
+        if (nearestDist >= range || nearestDist <= 0.001) {
+          return { x, y };
+        }
+
+        // Ease magnetism so it only adds a slight "stick" near the center instead of pulling at long range.
+        const stickyRange = Math.max(nearest.r * 0.95, range * 0.62);
+        if (nearestDist > stickyRange) {
+          return { x, y };
+        }
+
+        const closeness = (stickyRange - nearestDist) / stickyRange;
+        const pull = closeness * closeness * closeness * MAGNET_STRENGTH;
+        return {
+          x: x + (nearest.x - x) * pull,
+          y: y + (nearest.y - y) * pull
+        };
+      }
+
+      function recordAimHistory(x, y, t) {
+        state.aimHistory.push({ x, y, t });
+        const keepAfter = t - (HIT_WINDOW_MS + 120);
+        while (state.aimHistory.length > AIM_HISTORY_MAX) {
+          state.aimHistory.shift();
+        }
+        while (state.aimHistory.length && state.aimHistory[0].t < keepAfter) {
+          state.aimHistory.shift();
+        }
+      }
+
+      function getShotSamples(shotTs) {
+        const minTs = shotTs - HIT_WINDOW_MS;
+        const out = [];
+        for (let i = 0; i < state.aimHistory.length; i += 1) {
+          const a = state.aimHistory[i];
+          if (a.t >= minTs && a.t <= shotTs + 8) {
+            out.push(a);
+          }
+        }
+
+        if (!out.length && state.aimPoint.visible) {
+          out.push({ x: state.aimPoint.x, y: state.aimPoint.y, t: shotTs });
+        }
+
+        return out;
+      }
+
+      function findHitFromSamples(samples) {
+        let best = null;
+
+        for (let i = 0; i < state.targets.length; i += 1) {
+          const t = state.targets[i];
+          const effectiveRadius = t.r * HIT_RADIUS_MULTIPLIER;
+
+          for (let s = 0; s < samples.length; s += 1) {
+            const sample = samples[s];
+            const dx = sample.x - t.x;
+            const dy = sample.y - t.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist <= effectiveRadius) {
+              if (!best || dist < best.dist) {
+                best = {
+                  index: i,
+                  target: t,
+                  sample,
+                  dist
+                };
+              }
+            }
+          }
+        }
+
+        return best;
+      }
+
+      // Shot entry point: cooldown + aim-assist samples for short forgiveness window.
+      function tryShoot(timestamp) {
+        if (!state.aimPoint.visible) {
+          return;
+        }
+
+        if (timestamp - state.lastShotAt < state.shootCooldownMs) {
+          return;
+        }
+
+        state.lastShotAt = timestamp;
+        addHitEffect(state.aimPoint.x, state.aimPoint.y, "rgba(255, 90, 138, 0.85)");
+
+        const samples = getShotSamples(timestamp);
+        const hit = findHitFromSamples(samples);
+
+        if (hit) {
+          const t = hit.target;
+          const impactX = hit.sample.x * 0.35 + t.x * 0.65;
+          const impactY = hit.sample.y * 0.35 + t.y * 0.65;
+
+          spawnBurstParticles(t, impactX, impactY);
+          spawnShockwave(impactX, impactY, t.style.strokeColor);
+          triggerScreenShake();
+          addHitEffect(impactX, impactY, t.style.strokeColor);
+
+          state.targets.splice(hit.index, 1);
+          state.score += 1;
+          scoreLabel.textContent = `XAL: ${state.score}`;
+          updateSpeedFromScore();
+          spawnTarget(1);
+        }
+      }
+
+      function pushFingerSample(x, y, timestampMs) {
+        state.fingerHistory.push({ x, y, t: timestampMs });
+
+        const keepAfter = timestampMs - (FLICK_WINDOW_MS + 260);
+        while (state.fingerHistory.length > FINGER_HISTORY_SIZE) {
+          state.fingerHistory.shift();
+        }
+        while (state.fingerHistory.length && state.fingerHistory[0].t < keepAfter) {
+          state.fingerHistory.shift();
+        }
+      }
+
+      function getFlickReferenceSample(nowMs) {
+        if (!state.fingerHistory.length) {
+          return null;
+        }
+
+        const minTs = nowMs - FLICK_WINDOW_MS;
+        let candidate = state.fingerHistory[0];
+        for (let i = 0; i < state.fingerHistory.length; i += 1) {
+          const sample = state.fingerHistory[i];
+          if (sample.t >= minTs) {
+            candidate = sample;
+            break;
+          }
+        }
+        return candidate;
+      }
+
+      // Flick detector (primary shooting trigger).
+      function detectFlickShot(indexTip, indexPip, timestampMs) {
+        pushFingerSample(indexTip.x, indexTip.y, timestampMs);
+
+        const indexExtended = !indexPip || indexTip.y < (indexPip.y - INDEX_EXTENDED_MARGIN);
+        state.flickArmed = state.handDetected && indexExtended;
+
+        if (!state.flickArmed) {
+          state.flickLocked = false;
+          return;
+        }
+
+        if (state.flickLocked) {
+          if (indexTip.y > state.lastFlickY + FLICK_RESET_DY) {
+            state.flickLocked = false;
+          }
+          return;
+        }
+
+        const ref = getFlickReferenceSample(timestampMs);
+        if (!ref) {
+          return;
+        }
+
+        const dt = timestampMs - ref.t;
+        if (dt < FLICK_MIN_DT_MS || dt > FLICK_WINDOW_MS) {
+          return;
+        }
+
+        const dyUp = ref.y - indexTip.y;
+        const dx = Math.abs(ref.x - indexTip.x);
+        const velocity = dyUp / (dt / 1000);
+
+        if (dyUp >= FLICK_DY_THRESHOLD && velocity >= FLICK_VELOCITY_THRESHOLD && dx <= FLICK_MAX_DX) {
+          state.pendingShot = true;
+          state.pendingShotAt = timestampMs;
+          state.flickLocked = true;
+          state.lastFlickY = indexTip.y;
+        }
+      }
+
+      function resetCrosshairIfLost(nowMs) {
+        if (nowMs - state.lastStableAimAt > HOLD_LAST_AIM_MS) {
+          state.crosshair.visible = false;
+          state.aimPoint.visible = false;
+        }
+      }
+
+      // Smoothing filter:
+      // - EMA mode uses dt-adjusted alpha for stable behavior across FPS.
+      // - Optional One-Euro mode adapts smoothing with motion speed.
+      // - Deadzone and max-jump cap reduce jitter spikes.
+      function smoothCrosshair(rawX, rawY, nowMs) {
+        if (!state.filter.initialized) {
+          state.filter.initialized = true;
+          state.filter.lastTs = nowMs;
+          state.filter.lastRawX = rawX;
+          state.filter.lastRawY = rawY;
+          state.filter.emaX = rawX;
+          state.filter.emaY = rawY;
+          state.crosshair.x = rawX;
+          state.crosshair.y = rawY;
+          state.crosshairSpeed = 0;
+          return;
+        }
+
+        let fx;
+        let fy;
+        const dt = Math.max(1 / 180, Math.min(1 / 12, (nowMs - state.filter.lastTs) / 1000 || 1 / 60));
+        const rawDeltaX = rawX - state.filter.lastRawX;
+        const rawDeltaY = rawY - state.filter.lastRawY;
+        const rawSpeed = Math.hypot(rawDeltaX, rawDeltaY) / dt;
+
+        if (FILTER_MODE === "ONE_EURO") {
+          fx = state.filter.euroX.filter(rawX, nowMs);
+          fy = state.filter.euroY.filter(rawY, nowMs);
+        } else {
+          const motionPx = Math.hypot(rawX - state.filter.emaX, rawY - state.filter.emaY);
+          // Slow movement gets stronger smoothing; fast sweeps get more direct response for full-screen travel.
+          const speedBoost = Math.min(0.34, rawSpeed / 5200);
+          const motionBoost = Math.min(0.12, motionPx / 760);
+          const alphaBase = 1 - Math.pow(1 - EMA_ALPHA, dt * 60);
+          const alpha = Math.min(0.76, alphaBase + speedBoost + motionBoost);
+          state.filter.emaX += (rawX - state.filter.emaX) * alpha;
+          state.filter.emaY += (rawY - state.filter.emaY) * alpha;
+          fx = state.filter.emaX;
+          fy = state.filter.emaY;
+        }
+
+        state.filter.lastTs = nowMs;
+        state.filter.lastRawX = rawX;
+        state.filter.lastRawY = rawY;
+
+        let dx = fx - state.crosshair.x;
+        let dy = fy - state.crosshair.y;
+        const dist = Math.hypot(dx, dy);
+
+        // Allow wider sweeps to travel farther each frame while keeping a cap on abrupt spikes.
+        const jumpCap = MAX_JUMP_PX + Math.min(54, rawSpeed * 0.012);
+        if (dist > jumpCap) {
+          const scale = jumpCap / dist;
+          dx *= scale;
+          dy *= scale;
+        }
+
+        if (dist < DEADZONE_PX) {
+          // Ignore tiny low-speed fingertip noise, but still allow deliberate micro adjustments through.
+          if (rawSpeed < 170) {
+            dx = 0;
+            dy = 0;
+          } else {
+            state.crosshair.x += dx * 0.18;
+            state.crosshair.y += dy * 0.18;
+          }
+        } else if (dist < JITTER_HYSTERESIS_PX && rawSpeed < 240) {
+          state.crosshair.x += dx * 0.42;
+          state.crosshair.y += dy * 0.42;
+        } else {
+          state.crosshair.x += dx;
+          state.crosshair.y += dy;
+        }
+
+        state.crosshair.x = Math.min(state.width - AIM_MARGIN_PX, Math.max(AIM_MARGIN_PX, state.crosshair.x));
+        state.crosshair.y = Math.min(state.height - AIM_MARGIN_PX, Math.max(AIM_MARGIN_PX, state.crosshair.y));
+        state.crosshairSpeed = Math.hypot(dx, dy) / dt;
+      }
+
+      function processHandResults(results) {
+        const nowMs = performance.now();
+        const hands = results.multiHandLandmarks;
+
+        if (!hands || hands.length === 0) {
+          state.handDetected = false;
+          state.pinchNow = false;
+          state.pinchStarted = false;
+          state.flickArmed = false;
+          state.flickLocked = false;
+          resetCrosshairIfLost(nowMs);
+          return;
+        }
+
+        const confidence = results.multiHandedness && results.multiHandedness[0]
+          ? Number(results.multiHandedness[0].score || 0)
+          : 1;
+
+        const lm = hands[0];
+        const indexTip = lm[8];
+        const indexPip = lm[6];
+        const thumbTip = lm[4];
+
+        if (!indexTip || !thumbTip || confidence < HAND_CONFIDENCE_MIN) {
+          state.handDetected = false;
+          state.pinchNow = false;
+          state.pinchStarted = false;
+          state.flickArmed = false;
+          resetCrosshairIfLost(nowMs);
+          return;
+        }
+
+        state.handDetected = true;
+        state.crosshair.visible = true;
+        state.lastStableAimAt = nowMs;
+
+        const rawX = Math.min(state.width - AIM_MARGIN_PX, Math.max(AIM_MARGIN_PX, (1 - indexTip.x) * state.width));
+        const rawY = Math.min(state.height - AIM_MARGIN_PX, Math.max(AIM_MARGIN_PX, indexTip.y * state.height));
+
+        smoothCrosshair(rawX, rawY, nowMs);
+
+        detectFlickShot(indexTip, indexPip, nowMs);
+
+        const pinchDistance = Math.hypot(
+          indexTip.x - thumbTip.x,
+          indexTip.y - thumbTip.y,
+          indexTip.z - thumbTip.z
+        );
+        const pinchNow = pinchDistance < PINCH_FALLBACK_THRESHOLD;
+        state.pinchStarted = pinchNow && !state.pinchNow;
+        state.pinchNow = pinchNow;
+      }
+
+      async function initHandTracking() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("getUserMedia not available");
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        video.srcObject = stream;
+        await video.play();
+
+        const hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+          maxNumHands: 1,
+          // Keep the lighter model for speed, but tighten confidences slightly for steadier tracking.
+          modelComplexity: 0,
+          minDetectionConfidence: 0.6,
+          minTrackingConfidence: 0.55
+        });
+
+        hands.onResults(processHandResults);
+
+        let busy = false;
+        let queuedWhileBusy = false;
+        let lastSendAt = 0;
+        const hasVideoFrameCallback = typeof video.requestVideoFrameCallback === "function";
+
+        const sendLatestFrame = async () => {
+          if (busy || video.readyState < 2 || !state.running) {
+            return;
+          }
+
+          const nowMs = performance.now();
+          if (nowMs - lastSendAt < TRACKING_TARGET_INTERVAL_MS) {
+            return;
+          }
+
+          busy = true;
+          queuedWhileBusy = false;
+          lastSendAt = nowMs;
+
+          try {
+            await hands.send({ image: video });
+          } catch (_) {
+            // Keep the loop alive if a transient frame fails.
+          }
+
+          busy = false;
+
+          // If frames arrived while inference was running, immediately try the newest video frame next.
+          if (queuedWhileBusy && state.running && video.readyState >= 2) {
+            void sendLatestFrame();
+          }
+        };
+
+        const pumpTracking = () => {
+          if (video.readyState >= 2 && state.running) {
+            if (busy) {
+              queuedWhileBusy = true;
+            } else {
+              void sendLatestFrame();
+            }
+          }
+        };
+
+        const scheduleTracking = () => {
+          if (hasVideoFrameCallback) {
+            video.requestVideoFrameCallback(() => {
+              pumpTracking();
+              scheduleTracking();
+            });
+          } else {
+            requestAnimationFrame(() => {
+              pumpTracking();
+              scheduleTracking();
+            });
+          }
+        };
+
+        scheduleTracking();
+      }
+
+      function maybeSpawn(timestampMs) {
+        const baseInterval = 1750;
+        const interval = baseInterval / state.speedMultiplier;
+        const maxTargets = Math.min(10, 4 + Math.floor((state.speedMultiplier - 1) * 3));
+
+        if (state.targets.length < maxTargets && timestampMs - state.lastSpawnAt >= interval) {
+          state.lastSpawnAt = timestampMs;
+          spawnTarget(1);
+        }
+      }
+
+      function drawBackgroundGrid(timeSec) {
+        const spacing = 52;
+        const shift = (timeSec * 12) % spacing;
+
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        ctx.strokeStyle = "rgba(86, 123, 180, 0.25)";
+        ctx.lineWidth = 1;
+
+        for (let x = -spacing; x < state.width + spacing; x += spacing) {
+          ctx.beginPath();
+          ctx.moveTo(x + shift, 0);
+          ctx.lineTo(x + shift, state.height);
+          ctx.stroke();
+        }
+
+        for (let y = -spacing; y < state.height + spacing; y += spacing) {
+          ctx.beginPath();
+          ctx.moveTo(0, y + shift * 0.6);
+          ctx.lineTo(state.width, y + shift * 0.6);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+
+      function gameLoop(timestampMs) {
+        if (!state.running) {
+          return;
+        }
+
+        const dt = Math.min(0.033, (gameLoop.lastTs ? (timestampMs - gameLoop.lastTs) / 1000 : 0.016));
+        gameLoop.lastTs = timestampMs;
+
+        maybeSpawn(timestampMs);
+        updateTargets(dt);
+
+        if (state.crosshair.visible) {
+          const assisted = applyMagnetism(state.crosshair.x, state.crosshair.y);
+          state.aimPoint.x = assisted.x;
+          state.aimPoint.y = assisted.y;
+          state.aimPoint.visible = true;
+          recordAimHistory(state.aimPoint.x, state.aimPoint.y, timestampMs);
+        } else {
+          state.aimPoint.visible = false;
+        }
+
+        if (state.pendingShot) {
+          tryShoot(state.pendingShotAt || timestampMs);
+          state.pendingShot = false;
+        } else if (ENABLE_PINCH_FALLBACK && state.pinchStarted) {
+          tryShoot(timestampMs);
+          state.pinchStarted = false;
+        }
+
+        const shake = computeShakeOffset(dt);
+
+        ctx.clearRect(0, 0, state.width, state.height);
+        ctx.save();
+        ctx.translate(shake.x, shake.y);
+
+        drawBackgroundGrid(timestampMs / 1000);
+
+        for (let i = 0; i < state.targets.length; i += 1) {
+          drawTarget(state.targets[i]);
+        }
+
+        updateAndDrawParticles(dt);
+        updateAndDrawShockwaves(dt);
+        updateAndDrawEffects(dt);
+        drawCrosshair();
+
+        ctx.restore();
+
+        if (!state.handDetected && !state.statusLocked) {
+          setStatus("Qo'l topilmadi", false);
+        } else if (state.handDetected && !state.statusLocked) {
+          clearStatus();
+        }
+
+        state.rafId = requestAnimationFrame(gameLoop);
+      }
+
+      async function startGame() {
+        resizeCanvas();
+        spawnTarget(4);
+        updateSpeedFromScore();
+
+        setStatus("Tizim tayyorlanmoqda...", true);
+
+        try {
+          await initHandTracking();
+          setStatus("Tizim tayyor", true);
+
+          setTimeout(() => {
+            state.statusLocked = false;
+            clearStatus();
+          }, 1200);
+
+          state.running = true;
+          state.rafId = requestAnimationFrame(gameLoop);
+        } catch (_) {
+          setStatus("Kamera yoqilmadi", true);
+        }
+      }
+
+      function onVisibilityChange() {
+        if (document.hidden) {
+          state.running = false;
+          cancelAnimationFrame(state.rafId);
+        } else if (!state.running && statusEl.textContent !== "Kamera yoqilmadi") {
+          state.running = true;
+          gameLoop.lastTs = 0;
+          state.rafId = requestAnimationFrame(gameLoop);
+        }
+      }
+
+      window.addEventListener("resize", resizeCanvas, { passive: true });
+      document.addEventListener("visibilitychange", onVisibilityChange);
+
+      startGame();
+    })();
+  </script>
+</body>
+</html>
