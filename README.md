@@ -117,9 +117,3 @@ python -m http.server 8000
 ```
 
 Kamera localhost yoki HTTPS talab qiladi. `file://` bilan ishlamaydi.
-
----
-
-## Litsenziya
-
-MIT
