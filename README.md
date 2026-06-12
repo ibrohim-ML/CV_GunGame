@@ -1,102 +1,125 @@
-# Gun Game
+# 🔫 Gun Game
 
-## What is this?
-
-A browser game where you shoot floating targets by flicking your index finger upward. No controller. No mouse. Just you, your webcam, and bad aim.
-
-Made with MediaPipe Hands. Runs entirely in the browser. One HTML file.
+> **You vs the targets. Your finger is the gun.**
 
 ---
 
-## How it plays
+## 🎯 What is this?
 
-- Point your finger = move the crosshair
-- Flick up = shoot
-- Hit targets = score points
-- Score points = game speeds up
-- Miss = nothing happens (yet)
+A browser game where your index finger becomes a crosshair.  
+Flick it up to shoot. Hit targets. Survive the speed.
 
-The game gets faster as you score. Every 5 points adds 0.1x speed. At 3.0x targets fly across the screen like they owe you money.
+No mouse. No keyboard. No controller.  
+Just a webcam and your reflexes.
 
 ---
 
-## What's inside
+## 🕹️ Controls
 
-- 5 target styles with unique palettes and ring patterns
-- Particle explosions on hit (22+ particles with gravity)
-- Shockwave rings and screen shake
-- Dynamic speed multiplier
-- Flick detector (velocity-based with hysteresis)
-- Pinch backup trigger (thumb + index)
-- Smoothing filter chain (EMA + deadzone + jitter hysteresis)
+| What | How |
+|------|-----|
+| 🖐️ Aim | Point your index finger |
+| ⚡ Shoot | Flick your finger up fast |
+| 🔁 Cooldown | 185ms between shots |
+| 🤏 Alt. trigger | Pinch thumb + index |
 
 ---
 
-## Files
+## 🎨 Features
+
+- **5 target styles** — glowing rings, bullseyes, dashed patterns, auras, hybrids
+- **💥 Particle burst** — 22+ shattering particles with gravity and drag
+- **🌊 Shockwave** — expanding ripple on every hit
+- **📳 Screen shake** — brief rumble feedback
+- **⚡ Dynamic speed** — scales from 1.0x to 3.0x as you score
+- **🎯 Hit detection** — generous radius with smoothing forgiveness
+- **📊 Debug crosshair** — armed state color shift, flick tracker, history buffer
+
+---
+
+## 📁 One file
 
 ```
 CV_GunGame/
-├── test13.html          # The whole game (1318 lines, zero dependencies)
-├── .vscode/launch.json  # Debug config
-├── README.md
-└── .gitignore
+├── 🎮 test13.html     # The entire game (1318 lines)
+├── 📖 README.md
+└── 🗑️ .gitignore
 ```
+
+No frameworks. No build tools. Open and play.
 
 ---
 
-## Run it
+## 🚀 Run
 
 ```bash
 python -m http.server 8000
-# then open http://localhost:8000
+# → http://localhost:8000
 ```
 
-Camera needs localhost or HTTPS. `file://` won't work.
+> Camera requires localhost or HTTPS. No `file://`.
 
 ---
 
 <br>
 
-# Gun Game
+# 🔫 Gun Game
 
-## Bu nima?
-
-Floating nishonlarni ko'rsatkich barmog'ingizni siltab otadigan brauzer o'yini. Sichqoncha kerak emas, klaviatura kerak emas — faqat barmoq va kamera.
-
-MediaPipe Hands bilan qilingan. Bitta HTML fayl, hech qanday kutubxona kerak emas.
+> **Sen va nishonlar. Barmog'ing — qurol.**
 
 ---
 
-## Qanday o'ynaladi
+## 🎯 Bu nima?
 
-- Barmoqni ko'rsat = nishonni ol
-- Tepaga siltab = o'q uz
-- Nishonga tekkan = ball
-- Ball yig'ilgach = tezlik oshadi
-- Tezlik oshgach = nishonlar tezroq ucha boshlaydi
-- 3.0x tezlikda nishonlar raketadek uchadi
+Ko'rsatkich barmog'ing kursor vazifasini bajaradigan brauzer o'yini.  
+Tepaga silsang — o'q uzadi. Nishonga tekkiz. Tezlikka moslash.
 
-Har 5 ball uchun tezlik 0.1x ga oshadi. Maksimal 3.0x.
+Sichqoncha, klaviatura, djoystik kerak emas.  
+Faqat kamera va reflekslaring.
 
 ---
 
-## Ichida nima bor
+## 🕹️ Boshqaruv
 
-- 5 xil nishon stili (har xil ranglar va naqshlar)
-- Urilganda zarrachalar portlashi (22+ zarracha, gravitatsiya bilan)
-- Zarba to'lqini va ekran silkinishi
-- Tezlikni dinamik oshirish tizimi
-- Flick detektori (tezlikka asoslangan)
-- Pinch orqali o'q uzish (bosh + ko'rsatkich barmoq)
-- Maxsus smoothing filtrlari (EMA + deadzone + hysteresis)
+| Nima | Qanday |
+|------|--------|
+| 🖐️ Nishonga olish | Barmoqni ko'rsatish |
+| ⚡ O'q uzish | Tepaga siltash |
+| 🔁 Tayyorgarlik | 185ms oralig'ida |
+| 🤏 Zaxira | Barmoqni chimchish |
 
 ---
 
-## Ishga tushirish
+## 🎨 Xususiyatlar
+
+- **5 xil nishon** — yorqin halqalar, nishon markazi, tireli naqshlar, auralar
+- **💥 Portlash** — 22+ zarracha tortishish kuchi bilan
+- **🌊 Zarba to'lqini** — har bir urganda kengayuvchi halqa
+- **📳 Ekran silkinishi** — qisqa tebranish
+- **⚡ Dinamik tezlik** — 1.0x dan 3.0x gacha ball bilan oshadi
+- **🎯 Aniqlik** — keng nishon doirasi
+- **📊 Kursor holati** — o'qqa tayyorlik rangi, flick hisoblagichi
+
+---
+
+## 📁 Bitta fayl
+
+```
+CV_GunGame/
+├── 🎮 test13.html     # To'liq o'yin (1318 qator)
+├── 📖 README.md
+└── 🗑️ .gitignore
+```
+
+Framework kerak emas. Build kerak emas. Ochib o'ynang.
+
+---
+
+## 🚀 Ishga tushirish
 
 ```bash
 python -m http.server 8000
-# keyin http://localhost:8000 ni oching
+# → http://localhost:8000
 ```
 
-Kamera localhost yoki HTTPS talab qiladi. `file://` bilan ishlamaydi.
+> Kamera localhost yoki HTTPS talab qiladi. `file://` ishlamaydi.
