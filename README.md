@@ -1,97 +1,125 @@
-# CV GunGame — Hand Tracking Aim Trainer
-
-A browser-based aim trainer where you shoot targets using nothing but your index finger. No mouse, no keyboard — just your hand and a webcam.
-
-Built with MediaPipe Hands for real-time finger tracking, this game turns your index finger into a crosshair and a quick upward flick into a shot.
-
----
-
-## Gameplay
-
-- **Move** — point your index finger anywhere on screen
-- **Shoot** — flick your finger upward quickly
-- **Score** — hit targets to gain points and increase game speed
-- **Speed scales with score** — every 5 points, the multiplier goes up by 0.1x (max 3.0x)
-
-Each missed target that escapes off-screen costs nothing, but the pace keeps accelerating as you score.
-
----
-
-## Target System
-
-Targets come in 5 visual variants with randomized palettes:
-
-- Holographic rings
-- Bullseye with concentric circles
-- Dashed reticle patterns
-- Multi-layer glow targets
-- Aura-ring hybrids
-
-Each target has a pulsing animation, particle burst on hit, shockwave ripple, and optional screen shake feedback.
-
----
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Hand tracking | [MediaPipe Hands](https://developers.google.com/mediapipe/solutions/vision/hand_landmarker) |
-| Rendering | HTML5 Canvas |
-| Camera | Direct getUserMedia + requestVideoFrameCallback |
-| Styling | CSS with custom properties |
-| Logic | Vanilla JavaScript (ES6) |
-
----
-
-## Controls
-
-| Action | Gesture |
-|--------|---------|
-| Aim | Move index finger |
-| Shoot | Quick upward flick |
-| Cooldown | 185ms between shots |
-
-The flick detector uses a timestamp-based history buffer with velocity calculation. A pinch gesture (thumb + index) serves as a fallback trigger.
-
----
-
-## Getting Started
-
-```bash
-git clone https://github.com/ibrohim-ML/CV_GunGame.git
-cd CV_GunGame
-python -m http.server 8000
+```
+  ________      __      __  __          __    _
+ / ____/ /_  __/ /_    / / / /___ _____/ /__ (_)
+/ /   / / / / / __/   / /_/ / __ `/ __  / _ \/ /
+/ /___/ / /_/ / /_    / __  / /_/ / /_/ /  __/ /
+\____/_/\__,_/\__/   /_/ /_/\__,_/\__,_/\___/_/
+      __  __          __    _
+     / / / /___ _____/ /__ (_)
+    / /_/ / __ `/ __  / _ \/ /
+   / __  / /_/ / /_/ /  __/ /
+  /_/ /_/\__,_/\__,_/\___/_/
 ```
 
-Open **http://localhost:8000** in your browser. Camera permission will be requested on page load.
+## What is this?
 
-> Camera access requires localhost or HTTPS. Serve via the local server — do not open the file directly.
+A browser game where you shoot floating targets by flicking your index finger upward. No controller. No mouse. Just you, your webcam, and bad aim.
 
----
-
-## Visual Effects
-
-- **Particle burst** — 22+ particles on hit, with gravity and drag
-- **Shockwave ring** — expanding ring from impact point
-- **Screen shake** — brief camera shake on successful hit
-- **Crosshair** — dynamic ring with cross lines, color shifts when flick-armed
-- **Background grid** — subtle scrolling grid for depth perception
+Made with MediaPipe Hands. Runs entirely in the browser. One HTML file.
 
 ---
 
-## Project Structure
+## How it plays
+
+- Point your finger = move the crosshair
+- Flick up = shoot
+- Hit targets = score points
+- Score points = game speeds up
+- Miss = nothing happens (yet)
+
+The game gets faster as you score. Every 5 points adds 0.1x speed. At 3.0x targets fly across the screen like they owe you money.
+
+---
+
+## What's inside
+
+- 5 target styles with unique palettes and ring patterns
+- Particle explosions on hit (22+ particles with gravity)
+- Shockwave rings and screen shake
+- Dynamic speed multiplier
+- Flick detector (velocity-based with hysteresis)
+- Pinch backup trigger (thumb + index)
+- Smoothing filter chain (EMA + deadzone + jitter hysteresis)
+
+---
+
+## Files
 
 ```
 CV_GunGame/
-├── test13.html    # Complete game (logic, rendering, styles)
+├── test13.html          # The whole game (1318 lines, zero dependencies)
+├── .vscode/launch.json  # Debug config
 ├── README.md
 └── .gitignore
 ```
 
-Single-file design — no build tools or frameworks.
+---
+
+## Run it
+
+```bash
+python -m http.server 8000
+# then open http://localhost:8000
+```
+
+Camera needs localhost or HTTPS. `file://` won't work.
 
 ---
 
-## License
+<br>
+
+```
+   ██████   ██████  ██      ██████  ██    ██ ██████   █████  ███████
+  ██       ██    ██ ██      ██   ██ ██    ██ ██   ██ ██   ██ ██
+  ██   ███ ██    ██ ██      ██████  ██    ██ ██████  ███████ █████
+  ██    ██ ██    ██ ██      ██   ██ ██    ██ ██   ██ ██   ██ ██
+   ██████   ██████  ███████ ██████   ██████  ██   ██ ██   ██ ███████
+```
+
+## Bu nima?
+
+Floating nishonlarni ko'rsatkich barmog'ingizni siltab otadigan brauzer o'yini. Sichqoncha kerak emas, klaviatura kerak emas — faqat barmoq va kamera.
+
+MediaPipe Hands bilan qilingan. Bitta HTML fayl, hech qanday kutubxona kerak emas.
+
+---
+
+## Qanday o'ynaladi
+
+- Barmoqni ko'rsat = nishonni ol
+- Tepaga siltab = o'q uz
+- Nishonga tekkan = ball
+- Ball yig'ilgach = tezlik oshadi
+- Tezlik oshgach = nishonlar tezroq ucha boshlaydi
+- 3.0x tezlikda nishonlar raketadek uchadi
+
+Har 5 ball uchun tezlik 0.1x ga oshadi. Maksimal 3.0x.
+
+---
+
+## Ichida nima bor
+
+- 5 xil nishon stili (har xil ranglar va naqshlar)
+- Urilganda zarrachalar portlashi (22+ zarracha, gravitatsiya bilan)
+- Zarba to'lqini va ekran silkinishi
+- Tezlikni dinamik oshirish tizimi
+- Flick detektori (tezlikka asoslangan)
+- Pinch orqali o'q uzish (bosh + ko'rsatkich barmoq)
+- Maxsus smoothing filtrlari (EMA + deadzone + hysteresis)
+
+---
+
+## Ishga tushirish
+
+```bash
+python -m http.server 8000
+# keyin http://localhost:8000 ni oching
+```
+
+Kamera localhost yoki HTTPS talab qiladi. `file://` bilan ishlamaydi.
+
+---
+
+## Litsenziya
 
 MIT
